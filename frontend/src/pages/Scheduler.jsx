@@ -1,178 +1,185 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import axios from "axios";
 
-function Scheduler() {
+export default function Scheduler() {
   const [dailyHours, setDailyHours] = useState("");
   const [examDate, setExamDate] = useState("");
   const [schedule, setSchedule] = useState([]);
-  const [progress, setProgress] = useState([]);
+  const [progressPercent, setProgressPercent] = useState(0);
 
-  // Normalize date helper
-  const normalizeDate = (d) => d.toString().slice(0, 10);
-
-  // Load progress
+  // =========================
+  // Load saved schedule on page load
+  // =========================
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/progress")
-      .then((res) => res.json())
-      .then((data) => setProgress(data))
-      .catch(() => setProgress([]));
+    loadSavedSchedule();
   }, []);
 
+  const loadSavedSchedule = async () => {
+    try {
+      const res = await axios.get("http://127.0.0.1:8000/scheduler");
+
+      if (res.data.length > 0) {
+        const formatted = res.data.map(day => ({
+          ...day,
+          tasks: day.tasks.map(task => ({
+            ...task,
+            completed: false
+          }))
+        }));
+
+        setSchedule(formatted);
+        updateProgress(formatted);
+      }
+    } catch (err) {
+      console.error("Failed to load saved schedule");
+    }
+  };
+
+  // =========================
   // Generate schedule
-  const handleGenerate = async () => {
-    const res = await fetch("http://127.0.0.1:8000/scheduler", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  // =========================
+  const generateSchedule = async () => {
+    try {
+      const res = await axios.post("http://127.0.0.1:8000/scheduler", {
         daily_hours: Number(dailyHours),
-        exam_date: examDate,
-      }),
-    });
+        exam_date: examDate
+      });
 
-    const data = await res.json();
-    setSchedule(Array.isArray(data) ? data : []);
+      const formatted = res.data.map(day => ({
+        ...day,
+        tasks: day.tasks.map(task => ({
+          ...task,
+          completed: false
+        }))
+      }));
+
+      setSchedule(formatted);
+      updateProgress(formatted);
+    } catch (err) {
+      const msg =
+        err.response?.data?.detail ||
+        "Failed to generate schedule";
+      alert(msg);
+    }
   };
 
-  // Check completion
-  const isCompleted = (date, topic) => {
-    return progress.some(
-      (p) =>
-        normalizeDate(p.date) === date &&
-        p.topic === topic &&
-        p.completed
-    );
+  // =========================
+  // Toggle task completion
+  // =========================
+  const toggleTask = (dayIndex, taskIndex) => {
+    const updated = [...schedule];
+
+    updated[dayIndex].tasks[taskIndex].completed =
+      !updated[dayIndex].tasks[taskIndex].completed;
+
+    setSchedule(updated);
+    updateProgress(updated);
   };
 
-  // ✅ OPTIMISTIC TOGGLE (THE REAL FIX)
-  const toggleProgress = async (date, topic, hours, completed) => {
-    // 1️⃣ Update UI immediately
-    setProgress((prev) => {
-      const filtered = prev.filter(
-        (p) =>
-          !(
-            normalizeDate(p.date) === date &&
-            p.topic === topic
-          )
-      );
+  // =========================
+  // Update progress bar
+  // =========================
+  const updateProgress = (data) => {
+    let total = 0;
+    let completed = 0;
 
-      return [
-        ...filtered,
-        {
-          date,
-          topic,
-          hours,
-          completed,
-        },
-      ];
+    data.forEach(day => {
+      day.tasks.forEach(task => {
+        total++;
+        if (task.completed) completed++;
+      });
     });
 
-    // 2️⃣ Sync backend (no UI blocking)
-    await fetch("http://127.0.0.1:8000/progress", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        date,
-        topic,
-        hours,
-        completed,
-      }),
-    });
+    const percent = total === 0 ? 0 : Math.round((completed / total) * 100);
+    setProgressPercent(percent);
   };
 
-  // Progress calculation
-  const allTaskKeys = schedule.flatMap((day) =>
-    day.tasks.map((task) => `${day.date}-${task.topic}`)
-  );
-
-  const completedTaskKeys = progress
-    .filter((p) => p.completed)
-    .map((p) => `${normalizeDate(p.date)}-${p.topic}`);
-
-  const completedTasks = allTaskKeys.filter((key) =>
-    completedTaskKeys.includes(key)
-  ).length;
-
-  const totalTasks = allTaskKeys.length;
-  const completionPercent =
-    totalTasks === 0 ? 0 : Math.round((completedTasks / totalTasks) * 100);
-
+  // =========================
+  // UI
+  // =========================
   return (
-    <div style={{ padding: "30px" }}>
+    <div style={{ padding: "20px" }}>
       <h2>Study Scheduler</h2>
 
-      <div style={{ marginBottom: "15px" }}>
+      <label>
+        Daily Study Hours:
         <input
           type="number"
-          placeholder="Daily hours"
           value={dailyHours}
           onChange={(e) => setDailyHours(e.target.value)}
+          style={{ marginLeft: "10px" }}
         />
-        &nbsp;&nbsp;
+      </label>
+
+      <br /><br />
+
+      <label>
+        Exam Date:
         <input
           type="date"
           value={examDate}
           onChange={(e) => setExamDate(e.target.value)}
+          style={{ marginLeft: "10px" }}
         />
-        &nbsp;&nbsp;
-        <button onClick={handleGenerate}>Generate</button>
+      </label>
+
+      <button
+        onClick={generateSchedule}
+        style={{ marginLeft: "20px" }}
+      >
+        Generate
+      </button>
+
+      <hr />
+
+      <h3>Progress</h3>
+
+      <div
+        style={{
+          width: "100%",
+          background: "#ddd",
+          height: "20px",
+          borderRadius: "10px"
+        }}
+      >
+        <div
+          style={{
+            width: `${progressPercent}%`,
+            background: "green",
+            height: "100%",
+            borderRadius: "10px"
+          }}
+        />
       </div>
 
-      {schedule.length > 0 && (
-        <div style={{ marginBottom: "20px" }}>
-          <strong>Progress: {completionPercent}%</strong>
-          <div
-            style={{
-              height: "10px",
-              background: "#ddd",
-              borderRadius: "5px",
-              marginTop: "5px",
-            }}
-          >
-            <div
-              style={{
-                width: `${completionPercent}%`,
-                height: "100%",
-                background: "#4caf50",
-                borderRadius: "5px",
-              }}
-            />
-          </div>
-        </div>
-      )}
+      <p>{progressPercent}% completed</p>
 
-      {schedule.map((day, index) => (
-        <div
-          key={index}
-          style={{
-            border: "1px solid #ccc",
-            padding: "10px",
-            marginBottom: "10px",
-            borderRadius: "6px",
-          }}
-        >
-          <strong>{day.date}</strong>
-          <ul>
-            {day.tasks.map((task, i) => (
-              <li key={`${day.date}-${task.topic}`}>
+      <hr />
+
+      {schedule.length === 0 ? (
+        <p>No schedule generated yet.</p>
+      ) : (
+        schedule.map((day, dayIndex) => (
+          <div key={dayIndex}>
+            <h4>{day.date}</h4>
+
+            {day.tasks.map((task, taskIndex) => (
+              <div key={taskIndex}>
                 <input
                   type="checkbox"
-                  checked={isCompleted(day.date, task.topic)}
-                  onChange={(e) =>
-                    toggleProgress(
-                      day.date,
-                      task.topic,
-                      task.hours,
-                      e.target.checked
-                    )
-                  }
+                  checked={task.completed}
+                  onChange={() => toggleTask(dayIndex, taskIndex)}
                 />
-                &nbsp;{task.topic} — {task.hours} hrs
-              </li>
+                <span style={{ marginLeft: "8px" }}>
+                  {task.topic} ({task.hours} hrs)
+                </span>
+              </div>
             ))}
-          </ul>
-        </div>
-      ))}
+
+            <br />
+          </div>
+        ))
+      )}
     </div>
   );
 }
-
-export default Scheduler;

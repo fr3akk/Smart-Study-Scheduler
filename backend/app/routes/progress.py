@@ -1,12 +1,11 @@
 from fastapi import APIRouter
 from sqlalchemy.orm import Session
-from datetime import date
-
 from app.services.database import SessionLocal
 from app.models.progress import StudyProgress
 
 router = APIRouter(prefix="/progress", tags=["Progress"])
 
+# SAVE progress
 @router.post("/")
 def save_progress(progress: dict):
     db: Session = SessionLocal()
@@ -25,9 +24,19 @@ def save_progress(progress: dict):
 
     return {"status": "saved"}
 
+# GET progress (RETURN ARRAY!)
 @router.get("/")
 def get_progress():
     db: Session = SessionLocal()
     records = db.query(StudyProgress).all()
     db.close()
-    return records
+
+    return [
+        {
+            "date": r.date,
+            "topic": r.topic,
+            "hours": r.hours,
+            "completed": r.completed
+        }
+        for r in records
+    ]

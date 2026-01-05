@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
@@ -10,43 +10,57 @@ from app.models.schedule import StudySchedule
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 
 
-# =========================
-# Request Body Schema
-# =========================
 class ScheduleRequest(BaseModel):
     daily_hours: int
     exam_date: date
 
 
-# =========================
-# POST: Generate + Save Schedule
-# =========================
 @router.post("/")
 def generate_schedule(payload: ScheduleRequest):
     db: Session = SessionLocal()
 
-    # Get unfinished topics
-    topics = db.query(Topic).filter(Topic.is_completed == False).all()
-
-    if not topics:
+    # -------------------------
+    # Validate inputs
+    # -------------------------
+    if payload.daily_hours <= 0:
         db.close()
-        return []
+        raise HTTPException(400, "Daily study hours must be > 0")
 
     days = (payload.exam_date - date.today()).days
     if days <= 0:
         db.close()
-        return []
+        raise HTTPException(400, "Exam date must be in the future")
 
-    schedule = []
-    current_day = date.today()
+    topics = db.query(Topic).filter(Topic.is_completed == False).all()
+    if not topics:
+        db.close()
+        raise HTTPException(
+            400,
+            "No pending topics found. Please add subjects and topics first."
+        )
 
-    # Create a working queue (DO NOT mutate DB objects)
+    for t in topics:
+        if t.estimated_hours <= 0:
+            db.close()
+            raise HTTPException(
+                400,
+                f"Topic '{t.name}' has invalid estimated hours."
+            )
+
+    # -------------------------
+    # Prepare queue
+    # -------------------------
     topic_queue = [
         {"name": t.name, "hours": t.estimated_hours}
         for t in topics
     ]
 
+    schedule = []
+    current_day = date.today()
+
+    # -------------------------
     # Generate schedule
+    # -------------------------
     for _ in range(days):
         remaining = payload.daily_hours
         daily_tasks = []
@@ -71,22 +85,25 @@ def generate_schedule(payload: ScheduleRequest):
 
         if daily_tasks:
             schedule.append({
-                "date": current_day.isoformat(),
+                "date": current_day,   # ✅ KEEP AS DATE OBJECT
                 "tasks": daily_tasks
             })
 
         current_day += timedelta(days=1)
 
-    # =========================
-    # SAVE SCHEDULE TO DB
-    # =========================
-    db.query(StudySchedule).delete()  # clear old schedule
+        if not topic_queue:
+            break
+
+    # -------------------------
+    # Save schedule to DB
+    # -------------------------
+    db.query(StudySchedule).delete()
 
     for day in schedule:
         for task in day["tasks"]:
             db.add(
                 StudySchedule(
-                    date=day["date"],
+                    date=day["date"],   # ✅ DATE OBJECT
                     topic=task["topic"],
                     hours=task["hours"]
                 )
@@ -95,12 +112,18 @@ def generate_schedule(payload: ScheduleRequest):
     db.commit()
     db.close()
 
-    return schedule
+    # -------------------------
+    # Convert dates to string for response
+    # -------------------------
+    return [
+        {
+            "date": d["date"].isoformat(),
+            "tasks": d["tasks"]
+        }
+        for d in schedule
+    ]
 
 
-# =========================
-# GET: Load Saved Schedule
-# =========================
 @router.get("/")
 def get_saved_schedule():
     db: Session = SessionLocal()
@@ -116,7 +139,4 @@ def get_saved_schedule():
             "hours": r.hours
         })
 
-    return [
-        {"date": k, "tasks": v}
-        for k, v in grouped.items()
-    ]
+    return [{"date": k, "tasks": v} for k, v in grouped.items()]

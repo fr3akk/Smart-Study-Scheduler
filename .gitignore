@@ -1,8 +1,13 @@
 # Python
-venv/
-backend/venv/
 __pycache__/
-.env
+*.pyc
+venv/
+
+# Database
+*.db
 
 # Node
 node_modules/
+
+# Env
+.env
