@@ -1,194 +1,134 @@
-import { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import "./scheduler.css";
 import axios from "axios";
 
-export default function Scheduler() {
-  const [dailyHours, setDailyHours] = useState("");
-  const [examDate, setExamDate] = useState("");
+const Scheduler = () => {
   const [schedule, setSchedule] = useState([]);
-  const [progressPercent, setProgressPercent] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [loading, setLoading] = useState(false);
 
-  // =========================
-  // Load schedule + progress
-  // =========================
-  useEffect(() => {
-    loadScheduleAndProgress();
-  }, []);
-
-  const loadScheduleAndProgress = async () => {
+  /* ---------------- FETCH SCHEDULE ---------------- */
+  const fetchSchedule = async () => {
     try {
-      const [scheduleRes, progressRes] = await Promise.all([
-        axios.get("http://127.0.0.1:8000/scheduler"),
-        axios.get("http://127.0.0.1:8000/progress")
-      ]);
+      const res = await axios.get("http://localhost:5000/scheduler/");
 
-      const progressMap = {};
-      progressRes.data.forEach(p => {
-        progressMap[`${p.date}-${p.topic}-${p.hours}`] = p.completed;
-      });
-
-      const merged = scheduleRes.data.map(day => ({
-        ...day,
-        tasks: day.tasks.map(task => ({
-          ...task,
-          completed:
-            progressMap[`${day.date}-${task.topic}-${task.hours}`] || false
-        }))
-      }));
-
-      setSchedule(merged);
-      updateProgress(merged);
-    } catch (err) {
-      console.error("Failed to load schedule or progress");
-    }
-  };
-
-  // =========================
-  // Generate schedule
-  // =========================
-  const generateSchedule = async () => {
-    try {
-      const res = await axios.post("http://127.0.0.1:8000/scheduler", {
-        daily_hours: Number(dailyHours),
-        exam_date: examDate
-      });
-
-      const formatted = res.data.map(day => ({
-        ...day,
-        tasks: day.tasks.map(task => ({
-          ...task,
-          completed: false
-        }))
+      const formatted = res.data.map((task) => ({
+        title: task.title || task.topic || task.subject || "Study Task",
+        duration: task.duration || task.time || 0,
+        completed: task.completed ?? false,
       }));
 
       setSchedule(formatted);
-      updateProgress(formatted);
-      saveProgress(formatted);
     } catch (err) {
-      alert(err.response?.data?.detail || "Failed to generate schedule");
+      console.error("Failed to fetch schedule", err);
     }
   };
 
-  // =========================
-  // Toggle task
-  // =========================
-  const toggleTask = (dayIndex, taskIndex) => {
-    const updated = [...schedule];
-    updated[dayIndex].tasks[taskIndex].completed =
-      !updated[dayIndex].tasks[taskIndex].completed;
-
-    setSchedule(updated);
-    updateProgress(updated);
-    saveProgress(updated);
-  };
-
-  // =========================
-  // Save progress to backend
-  // =========================
-  const saveProgress = async (data) => {
-    const payload = [];
-
-    data.forEach(day => {
-      day.tasks.forEach(task => {
-        payload.push({
-          date: day.date,
-          topic: task.topic,
-          hours: task.hours,
-          completed: task.completed
-        });
-      });
-    });
-
+  /* ---------------- GENERATE SCHEDULE ---------------- */
+  const generateSchedule = async () => {
     try {
-      await axios.post("http://127.0.0.1:8000/progress", payload);
+      setLoading(true);
+
+      const payload = {
+        daily_hours: 4,
+        exam_date: "2026-12-31",
+      };
+
+      await axios.post(
+        "http://localhost:5000/scheduler/",
+        payload,
+        { headers: { "Content-Type": "application/json" } }
+      );
+
+      await fetchSchedule();
     } catch (err) {
-      console.error("Failed to save progress");
+      console.error(
+        "Failed to generate schedule",
+        err.response?.data || err.message
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
-  // =========================
-  // Progress calculation
-  // =========================
-  const updateProgress = (data) => {
-    let total = 0;
-    let completed = 0;
-
-    data.forEach(day => {
-      day.tasks.forEach(task => {
-        total++;
-        if (task.completed) completed++;
-      });
-    });
-
-    setProgressPercent(
-      total === 0 ? 0 : Math.round((completed / total) * 100)
+  /* ---------------- TOGGLE TASK ---------------- */
+  const toggleTask = (index) => {
+    setSchedule((prev) =>
+      prev.map((task, i) =>
+        i === index ? { ...task, completed: !task.completed } : task
+      )
     );
   };
 
-  // =========================
-  // UI
-  // =========================
+  /* ---------------- EFFECTS ---------------- */
+  useEffect(() => {
+    fetchSchedule();
+  }, []);
+
+  useEffect(() => {
+    if (schedule.length === 0) {
+      setProgress(0);
+      return;
+    }
+    const completed = schedule.filter((t) => t.completed).length;
+    setProgress(Math.round((completed / schedule.length) * 100));
+  }, [schedule]);
+
+  /* ---------------- UI ---------------- */
   return (
-    <div style={{ padding: "20px" }}>
-      <h2>Study Scheduler</h2>
+    <div className="scheduler-page">
+      <header className="scheduler-header">
+        <h1>Smart Study Scheduler</h1>
+        <p>AI-powered personalized study planning</p>
 
-      <label>
-        Daily Study Hours:
-        <input
-          type="number"
-          value={dailyHours}
-          onChange={e => setDailyHours(e.target.value)}
-          style={{ marginLeft: "10px" }}
-        />
-      </label>
+        <button
+          className="generate-btn"
+          onClick={generateSchedule}
+          disabled={loading}
+        >
+          {loading ? "Generating..." : "Generate Schedule"}
+        </button>
+      </header>
 
-      <br /><br />
-
-      <label>
-        Exam Date:
-        <input
-          type="date"
-          value={examDate}
-          onChange={e => setExamDate(e.target.value)}
-          style={{ marginLeft: "10px" }}
-        />
-      </label>
-
-      <button onClick={generateSchedule} style={{ marginLeft: "20px" }}>
-        Generate
-      </button>
-
-      <hr />
-
-      <h3>Progress</h3>
-      <div style={{ width: "100%", background: "#ddd", height: "20px", borderRadius: "10px" }}>
-        <div style={{ width: `${progressPercent}%`, background: "green", height: "100%", borderRadius: "10px" }} />
+      <div className="progress-card">
+        <h2>Progress Overview</h2>
+        <div className="progress-bar-wrapper">
+          <div
+            className="progress-bar-fill"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <span>{progress}% completed</span>
       </div>
-      <p>{progressPercent}% completed</p>
 
-      <hr />
+      <section className="tasks-section">
+        <h2>Today’s Tasks</h2>
 
-      {schedule.length === 0 ? (
-        <p>No schedule generated yet.</p>
-      ) : (
-        schedule.map((day, dayIndex) => (
-          <div key={dayIndex}>
-            <h4>{day.date}</h4>
-            {day.tasks.map((task, taskIndex) => (
-              <div key={taskIndex}>
-                <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => toggleTask(dayIndex, taskIndex)}
-                />
-                <span style={{ marginLeft: "8px" }}>
-                  {task.topic} ({task.hours} hrs)
-                </span>
+        {schedule.length === 0 ? (
+          <p className="empty-text">No tasks generated yet.</p>
+        ) : (
+          <div className="tasks-grid">
+            {schedule.map((task, index) => (
+              <div
+                key={`task-${index}`}
+                className={`task-card ${task.completed ? "done" : ""}`}
+              >
+                <div className="task-row">
+                  <input
+                    type="checkbox"
+                    checked={task.completed}
+                    onChange={() => toggleTask(index)}
+                  />
+                  <span className="task-title">{task.title}</span>
+                </div>
+                <span className="task-meta">{task.duration} mins</span>
               </div>
             ))}
-            <br />
           </div>
-        ))
-      )}
+        )}
+      </section>
     </div>
   );
-}
+};
+
+export default Scheduler;
