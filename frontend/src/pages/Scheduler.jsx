@@ -13,13 +13,16 @@ const Scheduler = () => {
   /* ---------------- FETCH SCHEDULE ---------------- */
   const fetchSchedule = async () => {
     try {
-      const res = await axios.get("http://localhost:5000/scheduler/");
+      const res = await axios.get("http://localhost:8000/scheduler/");
 
-      const formatted = res.data.map((task) => ({
-        title: task.title || task.topic || task.subject || "Study Task",
-        duration: task.duration || task.time || 0,
-        completed: task.completed ?? false,
+      const formatted = res.data.map(task => ({
+       title: task.title,
+       duration: task.duration,
+       day: task.day,
+       priority: task.priority,
+       completed: task.completed ?? false
       }));
+
 
       setSchedule(formatted);
     } catch (err) {
@@ -37,11 +40,12 @@ const Scheduler = () => {
         exam_date: "2026-12-31",
       };
 
-      await axios.post("http://localhost:5000/scheduler/", payload, {
-        headers: { "Content-Type": "application/json" },
-      });
+      const res = await axios.post("http://127.0.0.1:8000/scheduler/",payload,
+      { headers: { "Content-Type": "application/json" } }
+      );
 
-      await fetchSchedule();
+      setSchedule(res.data);
+
     } catch (err) {
       console.error(
         "Failed to generate schedule",
@@ -63,7 +67,7 @@ const Scheduler = () => {
 
   /* ---------------- EFFECTS ---------------- */
   useEffect(() => {
-    fetchSchedule();
+  
   }, []);
 
   useEffect(() => {
@@ -77,9 +81,10 @@ const Scheduler = () => {
 
   /* ---------------- CALENDAR GROUPING ---------------- */
   const calendarData = DAYS.map((day, dayIndex) => ({
-    day,
-    tasks: schedule.filter((_, idx) => idx % 7 === dayIndex),
+  day,
+  tasks: schedule.filter(task => task.day % 7 === dayIndex)
   }));
+
 
   /* ---------------- UI ---------------- */
   return (
@@ -127,7 +132,7 @@ const Scheduler = () => {
       {/* ---------------- LIST VIEW ---------------- */}
       {view === "list" && (
         <section className="tasks-section">
-          <h2>Today’s Tasks</h2>
+          <h2>Scheduled Tasks</h2>
 
           {schedule.length === 0 ? (
             <p className="empty-text">No tasks generated yet.</p>
@@ -138,6 +143,10 @@ const Scheduler = () => {
                   key={`task-${index}`}
                   className={`task-card ${task.completed ? "done" : ""}`}
                 >
+                  <small className={`priority ${task.priority?.toLowerCase()}`}>
+                  {task.priority}
+                  </small>
+
                   <div className="task-row">
                     <input
                       type="checkbox"
@@ -167,12 +176,32 @@ const Scheduler = () => {
                 {dayBlock.tasks.length === 0 ? (
                   <p className="empty-text">No tasks</p>
                 ) : (
-                  dayBlock.tasks.map((task, idx) => (
-                    <div key={idx} className="calendar-task">
-                      <span>{task.title}</span>
-                      <small>{task.duration} mins</small>
-                    </div>
-                  ))
+                  dayBlock.tasks.map((task, idx) => {
+  const globalIndex = schedule.findIndex(
+    t =>
+      t.title === task.title &&
+      t.day === task.day &&
+      t.duration === task.duration
+  );
+
+  return (
+    <div
+      key={`${task.title}-${idx}`}
+      className={`calendar-task ${task.completed ? "done" : ""}`}
+    >
+      <label className="calendar-task-row">
+        <input
+          type="checkbox"
+          checked={task.completed}
+          onChange={() => toggleTask(globalIndex)}
+        />
+        <span>{task.title}</span>
+      </label>
+      <small>{task.duration} mins</small>
+    </div>
+  );
+})
+
                 )}
               </div>
             ))}

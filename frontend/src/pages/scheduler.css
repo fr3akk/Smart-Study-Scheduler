@@ -78,6 +78,12 @@
   background: #ecfdf5;
 }
 
+.calendar-task.done {
+  background-color: #eafff1;
+  border: 1px solid #7dd3a8;
+}
+
+
 .task-card label {
   display: flex;
   align-items: center;
@@ -171,4 +177,16 @@
   padding: 6px;
   margin-bottom: 6px;
   font-size: 13px;
+}
+.calendar-task-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calendar-task {
+  padding: 8px;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  transition: background-color 0.2s ease;
 }
