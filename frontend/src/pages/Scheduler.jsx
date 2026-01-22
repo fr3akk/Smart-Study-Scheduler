@@ -15,14 +15,19 @@ const Scheduler = () => {
     try {
       const res = await axios.get("http://localhost:8000/scheduler/");
 
-      const formatted = res.data.map(task => ({
-       title: task.title,
-       duration: task.duration,
-       day: task.day,
-       priority: task.priority,
-       completed: task.completed ?? false
-      }));
+      // Restore completion state from localStorage
+      const savedCompletion =
+        JSON.parse(localStorage.getItem("taskCompletion")) || {};
 
+      const formatted = res.data.map((task, index) => ({
+        id: `${task.date}-${task.topic}-${index}`,
+        title: task.topic || "Study Task",
+        duration: (task.hours || 0) * 60, // convert hours → mins
+        date: task.date,
+        completed: savedCompletion[
+          `${task.date}-${task.topic}-${index}`
+        ] ?? false,
+      }));
 
       setSchedule(formatted);
     } catch (err) {
@@ -40,12 +45,14 @@ const Scheduler = () => {
         exam_date: "2026-12-31",
       };
 
-      const res = await axios.post("http://127.0.0.1:8000/scheduler/",payload,
-      { headers: { "Content-Type": "application/json" } }
+      await axios.post(
+        "http://127.0.0.1:8000/scheduler/",
+        payload,
+        { headers: { "Content-Type": "application/json" } }
       );
 
-      setSchedule(res.data);
-
+      // After generation, re-fetch from DB
+      await fetchSchedule();
     } catch (err) {
       console.error(
         "Failed to generate schedule",
@@ -58,18 +65,31 @@ const Scheduler = () => {
 
   /* ---------------- TOGGLE TASK ---------------- */
   const toggleTask = (index) => {
-    setSchedule((prev) =>
-      prev.map((task, i) =>
+    setSchedule((prev) => {
+      const updated = prev.map((task, i) =>
         i === index ? { ...task, completed: !task.completed } : task
-      )
-    );
+      );
+
+      // Persist checkbox state
+      const completionMap = {};
+      updated.forEach((t) => {
+        completionMap[t.id] = t.completed;
+      });
+      localStorage.setItem(
+        "taskCompletion",
+        JSON.stringify(completionMap)
+      );
+
+      return updated;
+    });
   };
 
-  /* ---------------- EFFECTS ---------------- */
+  /* ---------------- LOAD ON PAGE REFRESH ---------------- */
   useEffect(() => {
-  
+    fetchSchedule(); // ✅ THIS WAS MISSING
   }, []);
 
+  /* ---------------- PROGRESS CALC ---------------- */
   useEffect(() => {
     if (schedule.length === 0) {
       setProgress(0);
@@ -81,10 +101,12 @@ const Scheduler = () => {
 
   /* ---------------- CALENDAR GROUPING ---------------- */
   const calendarData = DAYS.map((day, dayIndex) => ({
-  day,
-  tasks: schedule.filter(task => task.day % 7 === dayIndex)
+    day,
+    tasks: schedule.filter((task) => {
+      const d = new Date(task.date);
+      return d.getDay() === (dayIndex + 1) % 7;
+    }),
   }));
-
 
   /* ---------------- UI ---------------- */
   return (
@@ -140,13 +162,9 @@ const Scheduler = () => {
             <div className="tasks-grid">
               {schedule.map((task, index) => (
                 <div
-                  key={`task-${index}`}
+                  key={task.id}
                   className={`task-card ${task.completed ? "done" : ""}`}
                 >
-                  <small className={`priority ${task.priority?.toLowerCase()}`}>
-                  {task.priority}
-                  </small>
-
                   <div className="task-row">
                     <input
                       type="checkbox"
@@ -155,7 +173,9 @@ const Scheduler = () => {
                     />
                     <span className="task-title">{task.title}</span>
                   </div>
-                  <span className="task-meta">{task.duration} mins</span>
+                  <span className="task-meta">
+                    {task.duration} mins
+                  </span>
                 </div>
               ))}
             </div>
@@ -177,31 +197,31 @@ const Scheduler = () => {
                   <p className="empty-text">No tasks</p>
                 ) : (
                   dayBlock.tasks.map((task, idx) => {
-  const globalIndex = schedule.findIndex(
-    t =>
-      t.title === task.title &&
-      t.day === task.day &&
-      t.duration === task.duration
-  );
+                    const globalIndex = schedule.findIndex(
+                      (t) => t.id === task.id
+                    );
 
-  return (
-    <div
-      key={`${task.title}-${idx}`}
-      className={`calendar-task ${task.completed ? "done" : ""}`}
-    >
-      <label className="calendar-task-row">
-        <input
-          type="checkbox"
-          checked={task.completed}
-          onChange={() => toggleTask(globalIndex)}
-        />
-        <span>{task.title}</span>
-      </label>
-      <small>{task.duration} mins</small>
-    </div>
-  );
-})
-
+                    return (
+                      <div
+                        key={`${task.id}-${idx}`}
+                        className={`calendar-task ${
+                          task.completed ? "done" : ""
+                        }`}
+                      >
+                        <label className="calendar-task-row">
+                          <input
+                            type="checkbox"
+                            checked={task.completed}
+                            onChange={() =>
+                              toggleTask(globalIndex)
+                            }
+                          />
+                          <span>{task.title}</span>
+                        </label>
+                        <small>{task.duration} mins</small>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             ))}
