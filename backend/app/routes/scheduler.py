@@ -116,3 +116,13 @@ def get_saved_schedule():
 
     finally:
         db.close()
+
+@router.delete("/")
+def clear_schedule():
+    db: Session = SessionLocal()
+    try:
+        db.query(StudySchedule).delete()
+        db.commit()
+        return {"message": "Schedule cleared successfully"}
+    finally:
+        db.close()
