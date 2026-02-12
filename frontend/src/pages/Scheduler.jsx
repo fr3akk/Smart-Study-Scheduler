@@ -10,57 +10,53 @@ const Scheduler = () => {
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState("list");
 
-  const [dailyHours, setDailyHours] = useState(
-    Number(localStorage.getItem("dailyHours")) || 4
-  );
+  const [dailyHours, setDailyHours] = useState(4);
+  const [examDate, setExamDate] = useState("");
 
-  const [examDate, setExamDate] = useState(
-    localStorage.getItem("examDate") || ""
-  );
-
-  /* ---------------- FETCH SCHEDULE ---------------- */
-  const fetchSchedule = async () => {
+  /* ==============================
+     LOAD SCHEDULE + PROGRESS
+  ============================== */
+  const fetchAllData = async () => {
     try {
-      const res = await axios.get("http://127.0.0.1:8000/scheduler/");
+      const scheduleRes = await axios.get(
+        "http://127.0.0.1:8000/scheduler/"
+      );
 
-      const savedCompletion =
-        JSON.parse(localStorage.getItem("taskCompletion")) || {};
+      const progressRes = await axios.get(
+        "http://127.0.0.1:8000/progress/"
+      );
 
-      const formatted = res.data.map((task) => {
+      const progressMap = {};
+      progressRes.data.forEach((item) => {
+        const id = `${item.date}-${item.topic}`;
+        progressMap[id] = item.completed;
+      });
+
+      const merged = scheduleRes.data.map((task) => {
         const id = `${task.date}-${task.topic}`;
 
         return {
           id,
           title: task.topic,
           date: task.date,
-          hours: task.hours,                 // ✅ single source of truth
-          completed: savedCompletion[id] ?? false,
+          hours: task.hours,
+          completed: progressMap[id] ?? false,
         };
       });
 
-      setSchedule(formatted);
+      setSchedule(merged);
     } catch (err) {
-      console.error("Failed to fetch schedule", err);
+      console.error("Error loading data:", err);
     }
   };
 
-  /* ---------------- GENERATE SCHEDULE ---------------- */
+  /* ==============================
+     GENERATE SCHEDULE
+  ============================== */
   const generateSchedule = async () => {
     if (!examDate) {
       alert("Please select an exam date.");
       return;
-    }
-
-    if (dailyHours <= 0) {
-      alert("Daily hours must be greater than 0.");
-      return;
-    }
-
-    if (schedule.length > 0) {
-      const confirmOverwrite = window.confirm(
-        "This will overwrite your existing schedule. Continue?"
-      );
-      if (!confirmOverwrite) return;
     }
 
     try {
@@ -71,63 +67,65 @@ const Scheduler = () => {
         exam_date: examDate,
       });
 
-      await fetchSchedule();
+      await fetchAllData();
     } catch (err) {
-      console.error("Failed to generate schedule", err);
       alert(err.response?.data?.detail || "Generation failed");
     } finally {
       setLoading(false);
     }
   };
 
-  /* ---------------- CLEAR SCHEDULE ---------------- */
+  /* ==============================
+     CLEAR SCHEDULE
+  ============================== */
   const clearSchedule = async () => {
-    const confirmClear = window.confirm(
-      "This will clear your schedule permanently. Continue?"
+    try {
+      await axios.delete("http://127.0.0.1:8000/scheduler/");
+      await axios.post("http://127.0.0.1:8000/progress/", []);
+      setSchedule([]);
+      setProgress(0);
+    } catch (err) {
+      console.error("Clear failed", err);
+    }
+  };
+
+  /* ==============================
+     TOGGLE TASK
+  ============================== */
+  const toggleTask = async (id) => {
+    const updated = schedule.map((task) =>
+      task.id === id
+        ? { ...task, completed: !task.completed }
+        : task
     );
-    if (!confirmClear) return;
 
-    await axios.delete("http://127.0.0.1:8000/scheduler/");
-    setSchedule([]);
-    setProgress(0);
-    localStorage.removeItem("taskCompletion");
+    setSchedule(updated);
+
+    try {
+      await axios.post(
+        "http://127.0.0.1:8000/progress/",
+        updated.map((t) => ({
+          date: t.date,
+          topic: t.title,
+          hours: t.hours,
+          completed: t.completed,
+        }))
+      );
+    } catch (err) {
+      console.error("Failed saving progress", err);
+    }
   };
 
-  /* ---------------- TOGGLE TASK ---------------- */
-  const toggleTask = (id) => {
-    setSchedule((prev) => {
-      const updated = prev.map((task) =>
-        task.id === id ? { ...task, completed: !task.completed } : task
-      );
-
-      const completionMap = {};
-      updated.forEach((t) => {
-        completionMap[t.id] = t.completed;
-      });
-
-      localStorage.setItem(
-        "taskCompletion",
-        JSON.stringify(completionMap)
-      );
-
-      return updated;
-    });
-  };
-
-  /* ---------------- LOAD ON START ---------------- */
+  /* ==============================
+     LOAD ON START
+  ============================== */
   useEffect(() => {
-    fetchSchedule();
+    fetchAllData();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("dailyHours", dailyHours);
-  }, [dailyHours]);
-
-  useEffect(() => {
-    if (examDate) localStorage.setItem("examDate", examDate);
-  }, [examDate]);
-
-  /* ---------------- PROGRESS ---------------- */
+  /* ==============================
+     PROGRESS CALCULATION
+  ============================== */
   useEffect(() => {
     if (schedule.length === 0) {
       setProgress(0);
@@ -135,14 +133,19 @@ const Scheduler = () => {
     }
 
     const completed = schedule.filter((t) => t.completed).length;
-    setProgress(Math.round((completed / schedule.length) * 100));
+
+    setProgress(
+      Math.round((completed / schedule.length) * 100)
+    );
   }, [schedule]);
 
-  /* ---------------- CALENDAR ---------------- */
-  const calendarData = DAYS.map((day, dayIndex) => {
+  /* ==============================
+     CALENDAR DATA
+  ============================== */
+  const calendarData = DAYS.map((day, index) => {
     const tasks = schedule.filter((task) => {
       const d = new Date(task.date);
-      return d.getDay() === dayIndex;
+      return d.getDay() === index;
     });
 
     const totalHours = tasks.reduce(
@@ -153,7 +156,9 @@ const Scheduler = () => {
     return { day, tasks, totalHours };
   });
 
-  /* ---------------- UI ---------------- */
+  /* ==============================
+     UI
+  ============================== */
   return (
     <div className="scheduler-page">
       <header className="scheduler-header">
@@ -166,7 +171,6 @@ const Scheduler = () => {
             min="1"
             value={dailyHours}
             onChange={(e) => setDailyHours(Number(e.target.value))}
-            placeholder="Daily study hours"
           />
 
           <input
@@ -176,37 +180,35 @@ const Scheduler = () => {
           />
         </div>
 
-         <button
+        <button
           className="generate-btn"
           onClick={generateSchedule}
           disabled={loading}
-          >
+        >
           {loading ? "Generating..." : "Generate Schedule"}
         </button>
 
         <button
           className="clear-btn"
           onClick={clearSchedule}
-          disabled={loading}
         >
           Clear Schedule
         </button>
 
         <div className="view-toggle">
           <button
-  className={view === "list" ? "active" : ""}
-  onClick={() => setView("list")}
->
-  List View
-</button>
+            className={view === "list" ? "active" : ""}
+            onClick={() => setView("list")}
+          >
+            List View
+          </button>
 
-<button
-  className={view === "calendar" ? "active" : ""}
-  onClick={() => setView("calendar")}
->
-  Calendar View
-</button>
-
+          <button
+            className={view === "calendar" ? "active" : ""}
+            onClick={() => setView("calendar")}
+          >
+            Calendar View
+          </button>
         </div>
       </header>
 
